@@ -13,8 +13,14 @@ export function useCodeExplain<T extends string>(
   explainMap: Record<T, () => string>,
   activeKey: Ref<T>
 ) {
-  const code = computed(() => highlightCode(codeMap[activeKey.value]()));
-  const explanation = computed(() => explainMap[activeKey.value]());
+  const code = computed(() => {
+    const fn = codeMap[activeKey.value];
+    return fn ? highlightCode(fn()) : '';
+  });
+  const explanation = computed(() => {
+    const fn = explainMap[activeKey.value];
+    return fn ? fn() : '';
+  });
   return { code, explanation } as {
     code: ComputedRef<string>;
     explanation: ComputedRef<string>;

@@ -23,25 +23,34 @@ defineProps<{
 </template>
 
 <style scoped>
-:deep(.c-code-comment) {
+:deep(.hljs-comment) {
   color: #9ca3af;
   font-style: italic;
 }
-:deep(.c-code-string) {
+:deep(.hljs-string) {
   color: #d97706;
 }
-:deep(.c-code-num) {
+:deep(.hljs-number) {
   color: #2563eb;
 }
-:deep(.c-code-keyword) {
+:deep(.hljs-keyword),
+:deep(.hljs-literal) {
   color: #7c3aed;
   font-weight: 600;
 }
-:deep(.c-code-class) {
+:deep(.hljs-title.class_),
+:deep(.hljs-type),
+:deep(.hljs-built_in) {
   color: #0891b2;
 }
-:deep(.c-code-camera) {
+:deep(.hljs-title.function_),
+:deep(.hljs-variable),
+:deep(.hljs-attr),
+:deep(.hljs-params) {
   color: #db2777;
   font-weight: 600;
+}
+:deep(.hljs-meta) {
+  color: #9ca3af;
 }
 </style>

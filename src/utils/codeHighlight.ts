@@ -1,88 +1,56 @@
 /**
- * 代码语法高亮（轻量手写实现，无需引入第三方库）
+ * 代码语法高亮（基于 highlight.js，按需注册语言）
  *
- * 将纯文本 JS 代码转换为带 <span> 标签的高亮 HTML 字符串。
- * 输出使用 c-code-* 系列 CSS 类，由使用方在 <style scoped> 中通过 :deep() 定义颜色。
+ * 将纯文本代码转换为带 <span class="hljs-*"> 标签的高亮 HTML 字符串。
+ * 输出使用 highlight.js 标准 token 类名（hljs-keyword / hljs-string 等），
+ * 由使用方在 <style scoped> 中通过 :deep() 定义颜色。
  *
  * 使用示例：
  *   <pre v-html="highlightCode(codeStr)"></pre>
+ *   <pre v-html="highlightCode(glslStr, 'glsl')"></pre>
  */
+import hljs from 'highlight.js/lib/core'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import glsl from 'highlight.js/lib/languages/glsl'
+import json from 'highlight.js/lib/languages/json'
+import xml from 'highlight.js/lib/languages/xml'
 
-const KEYWORDS = new Set([
-  'const',
-  'new',
-  'let',
-  'var',
-  'function',
-  'return',
-  'if',
-  'else',
-  'true',
-  'false',
-  'class',
-  'for',
-  'while',
-  'import',
-  'from',
-  'typeof',
-  'instanceof',
-]);
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('typescript', typescript)
+hljs.registerLanguage('glsl', glsl)
+hljs.registerLanguage('json', json)
+hljs.registerLanguage('xml', xml)
 
-/** 类名/全局对象（如 THREE）→ c-code-class */
-const CLASS_WORDS = new Set(['THREE']);
-
-/** 场景内常用实例名 → c-code-camera */
-const INSTANCE_WORDS = new Set(['camera', 'renderer', 'scene']);
-
-export function highlightCode(code: string): string {
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const src = esc(code);
-  let html = '';
-  let i = 0;
-  while (i < src.length) {
-    // 行注释 //
-    if (src.startsWith('//', i)) {
-      let j = src.indexOf('\n', i);
-      if (j === -1) j = src.length;
-      html += `<span class="c-code-comment">${src.slice(i, j)}</span>`;
-      i = j;
-      continue;
-    }
-    // 字符串（单/双/模板引号）
-    const ch = src.charAt(i);
-    if (ch === "'" || ch === '"' || ch === '`') {
-      let j = i + 1;
-      while (j < src.length && src.charAt(j) !== ch) {
-        if (src.charAt(j) === '\\') j++;
-        j++;
-      }
-      if (j < src.length) j++;
-      html += `<span class="c-code-string">${src.slice(i, j)}</span>`;
-      i = j;
-      continue;
-    }
-    // 数字
-    if (/\d/.test(ch)) {
-      let j = i;
-      while (j < src.length && /[\d.]/.test(src.charAt(j))) j++;
-      html += `<span class="c-code-num">${src.slice(i, j)}</span>`;
-      i = j;
-      continue;
-    }
-    // 标识符 / 关键字
-    if (/[A-Za-z_$]/.test(ch)) {
-      let j = i;
-      while (j < src.length && /[A-Za-z0-9_$]/.test(src.charAt(j))) j++;
-      const word = src.slice(i, j);
-      if (KEYWORDS.has(word)) html += `<span class="c-code-keyword">${word}</span>`;
-      else if (CLASS_WORDS.has(word)) html += `<span class="c-code-class">${word}</span>`;
-      else if (INSTANCE_WORDS.has(word)) html += `<span class="c-code-camera">${word}</span>`;
-      else html += word;
-      i = j;
-      continue;
-    }
-    html += ch;
-    i++;
+/** 根据代码内容启发式识别语言（JS 特征优先，识别 GLSL/HTML/JSON） */
+function detectLanguage(code: string): string {
+  // 教学代码均为 JS 演示，GLSL 多以字符串/片段内嵌出现，JS 特征优先避免误判
+  if (/\b(import|const|let|var|function|return|=>|new THREE\.|THREE\.|gl\.|document\.)/.test(code)) {
+    return 'javascript'
   }
-  return html;
+  if (
+    /^\s*#version\s+\d+|gl_FragColor|gl_Position|gl_PointSize|precision\s+(lowp|mediump|highp)|varying\s+(vec|float|int)|attribute\s+(vec|float|int)/.test(
+      code
+    )
+  ) {
+    return 'glsl'
+  }
+  if (/^\s*<(!doctype|\w+)/i.test(code)) return 'xml'
+  if (/^\s*[\{\[]/.test(code) && /^\s*[\{\[]\s*["'\w-]+\s*:/.test(code)) return 'json'
+  return 'javascript'
+}
+
+export function highlightCode(code: string, language?: string): string {
+  const lang = language ?? detectLanguage(code)
+  try {
+    if (hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
+    }
+  } catch {
+    // 高亮失败时降级：仅做 HTML 转义
+  }
+  return code
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
