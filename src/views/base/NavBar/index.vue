@@ -104,6 +104,13 @@ const menuOptions: MenuOption[] = [
     children: [
       { label: 'cad户型图', key: 'cad-floor-plan', icon: renderIcon(CadIcon) },
       { label: '商场三维导航', key: 'mall-navigation', icon: renderIcon(MallIcon) },
+      { label: '产品三维展示与零件拆解', key: 'product-showcase', icon: renderIcon(CubeIcon) },
+      { label: '仓储物流可视化', key: 'warehouse-visualization', icon: renderIcon(TextureIcon) },
+      { label: '应急疏散模拟', key: 'evacuation-simulation', icon: renderIcon(MallIcon) },
+      { label: '园区数字孪生', key: 'campus-twin', icon: renderIcon(CubeIcon) },
+      { label: '网页小游戏', key: 'web-game', icon: renderIcon(CubeIcon) },
+      { label: '地理数据可视化', key: 'geo-visualization', icon: renderIcon(MallIcon) },
+      { label: '工业设备监控', key: 'industrial-monitoring', icon: renderIcon(PerformanceIcon) },
     ],
   },
 ];

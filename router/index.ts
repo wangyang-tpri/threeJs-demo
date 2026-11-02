@@ -24,6 +24,16 @@ import MathAdvanced from '@/views/business/forward/MathAdvanced/index.vue';
 import WebGLBasics from '@/views/business/forward/WebGLBasics/index.vue';
 import CadFloorPlan from '@/views/business/application/CadFloorPlan/index.vue';
 import MallNavigation from '@/views/business/application/MallNavigation/index.vue';
+import ProductShowcase from '@/views/business/application/ProductShowcase/index.vue';
+const EvacuationSimulation = () =>
+  import('@/views/business/application/EvacuationSimulation/index.vue');
+const CampusTwin = () => import('@/views/business/application/CampusTwin/index.vue');
+const WebGame = () => import('@/views/business/application/WebGame/index.vue');
+const WarehouseVisualization = () =>
+  import('@/views/business/application/WarehouseVisualization/index.vue');
+const GeoVisualization = () => import('@/views/business/application/GeoVisualization/index.vue');
+const IndustrialMonitoring = () =>
+  import('@/views/business/application/IndustrialMonitoring/index.vue');
 
 const routes = [
   {
@@ -75,8 +85,27 @@ const routes = [
     component: ApplicationIndex,
     redirect: '/application/cad-floor-plan',
     children: [
+      { path: 'geo-visualization', name: 'geo-visualization', component: GeoVisualization },
+      {
+        path: 'evacuation-simulation',
+        name: 'evacuation-simulation',
+        component: EvacuationSimulation,
+      },
+      { path: 'campus-twin', name: 'campus-twin', component: CampusTwin },
+      { path: 'web-game', name: 'web-game', component: WebGame },
       { path: 'cad-floor-plan', name: 'cad-floor-plan', component: CadFloorPlan },
       { path: 'mall-navigation', name: 'mall-navigation', component: MallNavigation },
+      { path: 'product-showcase', name: 'product-showcase', component: ProductShowcase },
+      {
+        path: 'industrial-monitoring',
+        name: 'industrial-monitoring',
+        component: IndustrialMonitoring,
+      },
+      {
+        path: 'warehouse-visualization',
+        name: 'warehouse-visualization',
+        component: WarehouseVisualization,
+      },
     ],
   },
   // 旧路径重定向（兼容历史链接/刷新）
@@ -100,8 +129,15 @@ const routes = [
   { path: '/physics', redirect: '/forward/physics' },
   { path: '/math-advanced', redirect: '/forward/math-advanced' },
   { path: '/webgl-basics', redirect: '/forward/webgl-basics' },
+  { path: '/geo-visualization', redirect: '/application/geo-visualization' },
+  { path: '/evacuation-simulation', redirect: '/application/evacuation-simulation' },
+  { path: '/campus-twin', redirect: '/application/campus-twin' },
+  { path: '/web-game', redirect: '/application/web-game' },
   { path: '/cad-floor-plan', redirect: '/application/cad-floor-plan' },
   { path: '/mall-navigation', redirect: '/application/mall-navigation' },
+  { path: '/product-showcase', redirect: '/application/product-showcase' },
+  { path: '/industrial-monitoring', redirect: '/application/industrial-monitoring' },
+  { path: '/warehouse-visualization', redirect: '/application/warehouse-visualization' },
 ];
 
 export default createRouter({

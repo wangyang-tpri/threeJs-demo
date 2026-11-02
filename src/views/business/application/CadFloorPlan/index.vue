@@ -1,467 +1,263 @@
 <script setup lang="ts">
-import * as THREE from 'three';
-import { computed, onMounted, ref } from 'vue';
-import { useThreeScene } from '@/hooks/useThreeScene';
-import { useCodeExplain } from '@/hooks/useCodeExplain';
-import CodePanel from '@/components/base/CodePanel.vue';
+import { nextTick, ref, watch } from 'vue';
+import CadImportPanel from './components/CadImportPanel.vue';
+import CadViewport from './components/CadViewport.vue';
+import CadSettingsPanel from './components/CadSettingsPanel.vue';
+import CadLesson from './components/CadLesson.vue';
+import { defaultSettings, useCadPlan } from './composables/useCadPlan';
+import InteriorDesignPanel from './components/InteriorDesignPanel.vue';
+import { useInteriorDesign } from './composables/useInteriorDesign';
+import type { FurnitureKind } from './interior';
+import type { ModelSettings } from './types';
 
-const containerRef = ref<HTMLDivElement | null>(null);
-const fileInputRef = ref<HTMLInputElement | null>(null);
-
-let floorGroup: THREE.Object3D | null = null;
-
-type Feature = '2d' | '3d' | 'upload';
-const activeFeature = ref<Feature>('2d');
-const uploading = ref(false);
-const loadProgress = ref(0);
-const error = ref('');
-const dxfInfo = ref<{ name: string; walls: number } | null>(null);
-
-type Wall = [[number, number], [number, number]];
-
-const { scene, camera, controls } = useThreeScene(containerRef, {
-  background: 0xf5f7fa,
-  camera: { fov: 55, near: 0.1, far: 1000, position: [8, 10, 12], lookAt: [0, 0, 0] },
-  controls: { target: [0, 0, 0] },
-  grid: { size: 20, divisions: 20 },
-  axes: false,
-  lights: { ambient: 0.7, directional: 1.2, dirPosition: [10, 15, 8] },
-  shadow: { enabled: true, mapSize: 2048, cameraBounds: 18 },
-  onDispose: () => {
-    floorGroup = null;
-  },
+const viewport = ref<InstanceType<typeof CadViewport> | null>(null);
+const showCode = ref(false);
+const {
+  drawing,
+  sourceKind,
+  sampleKind,
+  mode,
+  preset,
+  unit,
+  settings,
+  activeLayers,
+  selectedId,
+  measuring,
+  measureStart,
+  measurements,
+  uploading,
+  loadProgress,
+  error,
+  notice,
+  visibleSegments,
+  bounds,
+  totalLength,
+  selected,
+  layers,
+  unitHint,
+  loadSample,
+  importFile,
+  setMode,
+  toggleLayer,
+  selectAllLayers,
+  toggleMeasuring,
+  measurePoint,
+  clearMeasurements,
+  resetAll,
+  exportDrawing,
+  download,
+} = useCadPlan();
+const interior = useInteriorDesign(bounds, visibleSegments, () => settings.thickness);
+watch([drawing, unit], () => {
+  interior.reset();
 });
-
-/* ================= 内置示例户型（模拟 CAD 解析后的墙体线段） ================= */
-const SAMPLE_WALLS: Wall[] = [
-  [
-    [0, 0],
-    [10, 0],
-  ],
-  [
-    [10, 0],
-    [10, 8],
-  ],
-  [
-    [10, 8],
-    [0, 8],
-  ],
-  [
-    [0, 8],
-    [0, 0],
-  ],
-  [
-    [5, 0],
-    [5, 4],
-  ],
-  [
-    [5, 4],
-    [10, 4],
-  ],
-  [
-    [0, 5],
-    [3, 5],
-  ],
-  [
-    [3, 5],
-    [3, 8],
-  ],
-];
-
-/* ================= 轻量 DXF 解析器 ================= */
-function parseDXF(text: string): Wall[] {
-  const rawLines = text.split(/\r?\n/);
-  const tokens: { code: string; value: string }[] = [];
-  for (let i = 0; i < rawLines.length - 1; i += 2) {
-    tokens.push({ code: rawLines[i]!.trim(), value: rawLines[i + 1]?.trim() ?? '' });
+watch(interior.enabled, (enabled) => {
+  if (enabled) {
+    measuring.value = false;
+    measureStart.value = null;
+    selectedId.value = null;
   }
-
-  const walls: Wall[] = [];
-  let idx = 0;
-  const peek = () => tokens[idx];
-  const next = () => tokens[idx++];
-
-  // 定位 ENTITIES 段
-  while (idx < tokens.length) {
-    const t = next();
-    if (!t) break;
-    if (t.code === '0' && t.value === 'SECTION') {
-      const t2 = next();
-      if (t2 && t2.code === '2' && t2.value === 'ENTITIES') break;
-    }
-  }
-
-  // 解析实体
-  while (idx < tokens.length) {
-    const t = peek();
-    if (!t) break;
-    if (t.code === '0' && t.value === 'ENDSEC') break;
-    if (t.code === '0') {
-      const type = t.value;
-      idx++;
-      // 收集该实体的所有组码
-      const entityTokens: { code: string; value: string }[] = [];
-      while (idx < tokens.length) {
-        const et = peek();
-        if (!et || et.code === '0') break;
-        entityTokens.push(next()!);
-      }
-      const get = (code: string) => entityTokens.find((e) => e.code === code)?.value;
-
-      if (type === 'LINE') {
-        const x1 = parseFloat(get('10') ?? '0');
-        const y1 = parseFloat(get('20') ?? '0');
-        const x2 = parseFloat(get('11') ?? '0');
-        const y2 = parseFloat(get('21') ?? '0');
-        walls.push([
-          [x1, y1],
-          [x2, y2],
-        ]);
-      } else if (type === 'LWPOLYLINE' || type === 'POLYLINE') {
-        const pts: [number, number][] = [];
-        const closed = (parseInt(get('70') ?? '0') & 1) === 1;
-        let curPt: [number, number] | null = null;
-        for (const et of entityTokens) {
-          if (et.code === '10') {
-            curPt = [parseFloat(et.value), 0];
-            pts.push(curPt);
-          } else if (et.code === '20' && curPt) {
-            curPt[1] = parseFloat(et.value);
-          }
-        }
-        for (let i = 0; i < pts.length - 1; i++) walls.push([pts[i]!, pts[i + 1]!]);
-        if (closed && pts.length > 2) walls.push([pts[pts.length - 1]!, pts[0]!]);
-      } else if (type === 'CIRCLE') {
-        const cx = parseFloat(get('10') ?? '0');
-        const cy = parseFloat(get('20') ?? '0');
-        const r = parseFloat(get('40') ?? '0');
-        if (r > 0) {
-          const segs = 32;
-          for (let i = 0; i < segs; i++) {
-            const a1 = (i / segs) * Math.PI * 2;
-            const a2 = ((i + 1) / segs) * Math.PI * 2;
-            walls.push([
-              [cx + Math.cos(a1) * r, cy + Math.sin(a1) * r],
-              [cx + Math.cos(a2) * r, cy + Math.sin(a2) * r],
-            ]);
-          }
-        }
-      } else if (type === 'ARC') {
-        const cx = parseFloat(get('10') ?? '0');
-        const cy = parseFloat(get('20') ?? '0');
-        const r = parseFloat(get('40') ?? '0');
-        const a1 = (parseFloat(get('50') ?? '0') * Math.PI) / 180;
-        const a2 = (parseFloat(get('51') ?? '360') * Math.PI) / 180;
-        if (r > 0) {
-          const segs = 16;
-          for (let i = 0; i < segs; i++) {
-            const t1 = a1 + (a2 - a1) * (i / segs);
-            const t2 = a1 + (a2 - a1) * ((i + 1) / segs);
-            walls.push([
-              [cx + Math.cos(t1) * r, cy + Math.sin(t1) * r],
-              [cx + Math.cos(t2) * r, cy + Math.sin(t2) * r],
-            ]);
-          }
-        }
-      }
-    } else {
-      idx++;
-    }
-  }
-  return walls;
-}
-
-/* ================= 坐标归一化（DXF 毫米单位 → 合理范围） ================= */
-function normalizeWalls(walls: Wall[]): Wall[] {
-  if (walls.length === 0) return walls;
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
-  for (const [p1, p2] of walls) {
-    minX = Math.min(minX, p1[0], p2[0]);
-    minY = Math.min(minY, p1[1], p2[1]);
-    maxX = Math.max(maxX, p1[0], p2[0]);
-    maxY = Math.max(maxY, p1[1], p2[1]);
-  }
-  const maxDim = Math.max(maxX - minX, maxY - minY) || 1;
-  const scale = 10 / maxDim;
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  return walls.map(([p1, p2]) => [
-    [(p1[0] - cx) * scale, (p1[1] - cy) * scale],
-    [(p2[0] - cx) * scale, (p2[1] - cy) * scale],
-  ]);
-}
-
-/* ================= 2D 线框 ================= */
-function wallsTo2D(walls: Wall[]): THREE.LineSegments {
-  const pts: THREE.Vector3[] = [];
-  for (const [p1, p2] of walls) {
-    pts.push(new THREE.Vector3(p1[0], 0.02, p1[1]));
-    pts.push(new THREE.Vector3(p2[0], 0.02, p2[1]));
-  }
-  const geo = new THREE.BufferGeometry().setFromPoints(pts);
-  return new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x2563eb }));
-}
-
-/* ================= 3D 墙体（线段 → Box 拉伸） ================= */
-function wallsTo3D(walls: Wall[], height = 2.8, thickness = 0.24): THREE.Group {
-  const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.85 });
-  for (const [p1, p2] of walls) {
-    const dx = p2[0] - p1[0];
-    const dz = p2[1] - p1[1];
-    const len = Math.sqrt(dx * dx + dz * dz);
-    if (len < 0.01) continue;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, height, thickness), mat);
-    mesh.position.set((p1[0] + p2[0]) / 2, height / 2, (p1[1] + p2[1]) / 2);
-    mesh.rotation.y = -Math.atan2(dz, dx);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-  }
-  return group;
-}
-
-/* ================= 相机适配到户型 ================= */
-function fitCameraToObject(obj: THREE.Object3D) {
-  const cam = camera.value;
-  const ctl = controls.value;
-  if (!cam || !ctl) return;
-  const box = new THREE.Box3().setFromObject(obj);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.z, 1);
-  cam.position.set(center.x + maxDim * 0.9, maxDim * 1.3, center.z + maxDim * 0.9);
-  ctl.target.copy(center);
-  ctl.update();
-}
-
-/* ================= 显示户型 ================= */
-function showFloorPlan(walls: Wall[], mode: '2d' | '3d', name: string) {
-  clearFloor();
-  const normalized = normalizeWalls(walls);
-  const group = new THREE.Group();
-
-  if (mode === '2d') {
-    group.add(wallsTo2D(normalized));
-  } else {
-    group.add(wallsTo3D(normalized));
-    // 动态地板
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
-    for (const [p1, p2] of normalized) {
-      minX = Math.min(minX, p1[0], p2[0]);
-      minY = Math.min(minY, p1[1], p2[1]);
-      maxX = Math.max(maxX, p1[0], p2[0]);
-      maxY = Math.max(maxY, p1[1], p2[1]);
-    }
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(maxX - minX + 2, maxY - minY + 2),
-      new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.9 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set((minX + maxX) / 2, 0, (minY + maxY) / 2);
-    floor.receiveShadow = true;
-    group.add(floor);
-  }
-
-  floorGroup = group;
-  scene.value!.add(group);
-  fitCameraToObject(group);
-  dxfInfo.value = { name, walls: normalized.length };
-}
-
-function clearFloor() {
-  const s = scene.value;
-  if (floorGroup && s) s.remove(floorGroup);
-  floorGroup = null;
-}
-
-/* ================= 按钮功能 ================= */
-function showSample2D() {
-  activeFeature.value = '2d';
-  error.value = '';
-  showFloorPlan(SAMPLE_WALLS, '2d', '示例户型');
-}
-
-function showSample3D() {
-  activeFeature.value = '3d';
-  error.value = '';
-  showFloorPlan(SAMPLE_WALLS, '3d', '示例户型');
-}
-
-function triggerUpload() {
-  fileInputRef.value?.click();
-}
-
-async function handleFileChange(e: Event) {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = '';
-  if (!file) return;
-
-  const ext = file.name.split('.').pop()?.toLowerCase();
-  if (ext !== 'dxf') {
-    error.value = '请选择 .dxf 格式的 CAD 图纸文件';
-    dxfInfo.value = null;
+});
+function beginFurniture(kind: FurnitureKind) {
+  measuring.value = false;
+  measureStart.value = null;
+  if (!visibleSegments.value.length) {
+    interior.message.value = '请先显示至少一个图层再放置家具。';
     return;
   }
-
-  activeFeature.value = 'upload';
-  error.value = '';
-  uploading.value = true;
-  loadProgress.value = 0;
-
-  try {
-    const text = await file.text();
-    loadProgress.value = 40;
-    const walls = parseDXF(text);
-    loadProgress.value = 80;
-    if (walls.length === 0) {
-      error.value = '未解析到有效图形实体（支持 LINE / LWPOLYLINE / CIRCLE / ARC）';
-      dxfInfo.value = null;
-      clearFloor();
-    } else {
-      showFloorPlan(walls, '2d', file.name);
-    }
-    loadProgress.value = 100;
-  } catch (err) {
-    error.value = `解析失败：${(err as Error)?.message ?? String(err)}`;
-    dxfInfo.value = null;
-    console.error(err);
+  interior.begin(kind);
+}
+function moveFurniture() {
+  measuring.value = false;
+  interior.cancel();
+  interior.moving.value = true;
+}
+function toggleMeasureWithInterior() {
+  interior.cancel();
+  toggleMeasuring();
+}
+function exportInterior() {
+  download(
+    JSON.stringify(
+      {
+        version: 1,
+        drawing: drawing.value.name,
+        unit: 'm',
+        walls: visibleSegments.value,
+        design: interior.design.value,
+      },
+      null,
+      2
+    ),
+    'cad-interior-design.json'
+  );
+}
+async function importInterior(file: File) {
+  if (file.size > 8 * 1024 * 1024) {
+    error.value = '装修方案文件不能超过 8 MB。';
+    return;
   }
-  uploading.value = false;
+  try {
+    const data = JSON.parse(await file.text());
+    if (
+      data.version !== 1 ||
+      data.unit !== 'm' ||
+      data.drawing !== drawing.value.name ||
+      JSON.stringify(data.walls) !== JSON.stringify(visibleSegments.value)
+    )
+      throw new Error('方案与当前图纸或可见墙段不匹配，请先恢复对应图纸、单位和图层。');
+    interior.restore(data.design);
+    error.value = '';
+    interior.message.value = '装修方案已导入。';
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '方案读取失败。';
+  }
 }
-
-function resetAll() {
-  clearFloor();
-  dxfInfo.value = null;
-  error.value = '';
-  activeFeature.value = '2d';
+const exportOptions = [
+  { label: '当前平面图 · SVG', key: 'svg' },
+  { label: '线段、参数与测量 · JSON', key: 'json' },
+  { label: '当前视角 · PNG', key: 'png' },
+];
+function updateSettings(patch: Partial<ModelSettings>) {
+  Object.assign(settings, patch);
 }
-
-/* ================= 代码与讲解（函数式动态生成） ================= */
-const codeMap: Record<Feature, () => string> = {
-  '2d': () => `// ① CAD 图纸解析为 2D 线框
-const walls = parseDXF(dxfText)   // 提取 LINE / LWPOLYLINE / CIRCLE / ARC
-const pts = []
-for (const [p1, p2] of walls) {
-  pts.push(new THREE.Vector3(p1[0], 0, p1[1]))
-  pts.push(new THREE.Vector3(p2[0], 0, p2[1]))
+async function resetPage() {
+  interior.reset();
+  interior.enabled.value = false;
+  resetAll();
+  await nextTick();
+  viewport.value?.fitView();
 }
-const geo = new THREE.BufferGeometry().setFromPoints(pts)
-scene.add(new THREE.LineSegments(geo,
-  new THREE.LineBasicMaterial({ color: 0x2563eb })))`,
-  '3d': () => `// ② 2D 线框转换为 3D 墙体场景
-for (const [p1, p2] of walls) {
-  const dx = p2[0] - p1[0], dz = p2[1] - p1[1]
-  const len = Math.hypot(dx, dz)
-  // 每段线 → 一个 Box（长 × 层高 × 墙厚）
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(len, 2.8, 0.24),
-    wallMaterial
-  )
-  mesh.position.set((p1[0]+p2[0])/2, 1.4, (p1[1]+p2[1])/2)
-  mesh.rotation.y = -Math.atan2(dz, dx)   // 沿线段方向
-  scene.add(mesh)
-}`,
-  upload: () => `// ③ 上传 DXF 文件解析
-const text = await file.text()
-const walls = parseDXF(text)   // 轻量 DXF 解析器
-// walls: [[[x1,y1],[x2,y2]], ...]
-showFloorPlan(walls, '2d', file.name)`,
-};
-
-const explainMap: Record<Feature, () => string> = {
-  '2d': () =>
-    `【原理】CAD 图纸（DXF 格式）本质是文本文件，由"组码 + 值"对描述图形实体。\n【解析】提取 LINE（直线）、LWPOLYLINE（多段线）、CIRCLE（圆）、ARC（圆弧）的顶点，转为统一线段列表。\n【渲染】在 XZ 平面用 LineSegments 绘制所有线段，还原 CAD 图纸的 2D 线框。\n【归一化】DXF 常用毫米单位，自动平移+缩放到合理范围。\n${infoLine()}`,
-  '3d': () =>
-    `【原理】将 2D 线段逐段"拉伸"为 3D 墙体：每段线段对应一个 BoxGeometry（长度 × 层高 2.8m × 墙厚 0.24m）。\n【关键】计算线段长度 len=√(dx²+dz²)，中点定位，rotation.y = -atan2(dz,dx) 使 Box 沿线段方向。\n【场景】墙体 + 动态地板（PlaneGeometry）+ 平行光阴影，构成可漫游的三维户型。\n${infoLine()}`,
-  upload: () =>
-    `【原理】用户上传 .dxf 文件，用 file.text() 读取文本，交给轻量 DXF 解析器提取图形实体。\n【解析器】支持 LINE / LWPOLYLINE / POLYLINE / CIRCLE / ARC，输出统一的线段列表。\n【限制】复杂 DXF（块引用 INSERT、标注、填充 HATCH）可能解析不全，建议用仅含墙体的简单图层测试。\n${infoLine()}`,
-};
-
-function infoLine() {
-  if (uploading.value) return '【状态】正在解析 DXF 文件…';
-  if (error.value) return `【状态】${error.value}`;
-  if (!dxfInfo.value) return '【状态】点击按钮查看示例户型，或上传 DXF 文件';
-  const mode = activeFeature.value === '3d' ? '3D 墙体' : '2D 线框';
-  return `【当前】${dxfInfo.value.name}｜墙体线段 ${dxfInfo.value.walls} 段｜模式 ${mode}`;
+async function handleExport(format: 'svg' | 'json' | 'png') {
+  if (format !== 'png') {
+    exportDrawing(format);
+    return;
+  }
+  const image = await viewport.value?.capture();
+  if (image) download(image, 'cad-preview.png', 'image/png');
+  else error.value = '无法生成截图，请稍后重试。';
 }
-
-const panelTitle = computed(() =>
-  activeFeature.value === '2d' ? '2D 线框' : activeFeature.value === '3d' ? '3D 转换' : 'DXF 上传'
-);
-
-const { code, explanation } = useCodeExplain(codeMap, explainMap, activeFeature);
-
-/* ================= 生命周期 ================= */
-onMounted(() => {
-  showSample2D();
-});
 </script>
 
 <template>
-  <div class="flex h-full flex-col gap-3 p-4">
-    <!-- 功能按钮区 -->
-    <div class="flex flex-wrap items-center gap-2">
-      <n-button
-        size="small"
-        :type="activeFeature === '2d' ? 'primary' : 'default'"
-        @click="showSample2D"
-      >
-        示例户型（2D）
-      </n-button>
-      <n-button
-        size="small"
-        :type="activeFeature === '3d' ? 'primary' : 'default'"
-        @click="showSample3D"
-      >
-        转换 3D 场景
-      </n-button>
-      <n-button
-        size="small"
-        :type="activeFeature === 'upload' ? 'primary' : 'default'"
-        @click="triggerUpload"
-      >
-        上传 DXF
-      </n-button>
-      <n-button size="small" quaternary @click="resetAll">重置</n-button>
-      <input
-        ref="fileInputRef"
-        type="file"
-        accept=".dxf"
-        class="hidden"
-        @change="handleFileChange"
-      />
-    </div>
-
-    <!-- 主体：左 3D 场景 / 右 代码+讲解 -->
-    <div class="flex min-h-0 flex-1 gap-3">
-      <div
-        ref="containerRef"
-        class="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-gray-200 shadow-sm"
-      ></div>
-
-      <CodePanel :title="panelTitle" :code="code" :explanation="explanation" />
-    </div>
-
-    <!-- 加载进度条（屏幕正中间，宽度 400px） -->
-    <div
-      v-if="uploading"
-      class="fixed left-1/2 top-1/2 z-50 w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-gray-200 bg-white/95 p-5 shadow-xl"
+  <div
+    class="cad-page flex flex-col h-full overflow-auto gap-4 bg-[#f6f8fa] p-5 max-[800px]:p-3 text-[#304a54]"
+  >
+    <header class="flex shrink-0 items-center justify-between flex-wrap gap-3">
+      <div>
+        <div class="text-[10px] font-bold tracking-[2px] text-[#238a80]">
+          CAD STUDIO / 图纸可视化
+        </div>
+        <h1 class="m-0 mt-1 text-[24px] max-[800px]:text-xl font-bold">
+          让平面图纸，立体呈现<span
+            class="align-middle ml-3 border border-solid border-[#b3d7d0] rounded px-2 py-1 text-[10px] text-[#188a80]"
+            >DXF → 3D</span
+          >
+        </h1>
+        <p class="mb-0 mt-1 text-xs text-[#94a5ad]">
+          保留实际尺寸，从图层检查、三维建模到室内装修设计。
+        </p>
+      </div>
+      <div class="flex items-center flex-wrap gap-2">
+        <n-button
+          size="small"
+          :type="interior.enabled.value ? 'primary' : 'default'"
+          @click="interior.enabled.value = !interior.enabled.value"
+          >{{ interior.enabled.value ? '退出装修编辑' : '室内装修设计' }}</n-button
+        >
+        <n-dropdown :options="exportOptions" @select="handleExport"
+          ><n-button size="small">导出 ↓</n-button></n-dropdown
+        ><n-button size="small" @click="showCode = !showCode">{{
+          showCode ? '收起讲解' : '代码讲解'
+        }}</n-button
+        ><n-button size="small" @click="resetPage">重置</n-button>
+      </div>
+    </header>
+    <n-alert v-if="error" class="cad-error shrink-0" type="error" closable @close="error = ''">{{
+      error
+    }}</n-alert>
+    <n-alert
+      v-else-if="notice"
+      class="cad-notice shrink-0"
+      type="success"
+      closable
+      @close="notice = ''"
+      >{{ notice }}</n-alert
     >
-      <div class="mb-2 text-center text-sm font-medium text-gray-700">正在解析 DXF 文件…</div>
-      <n-progress
-        type="line"
-        :percentage="loadProgress"
-        :show-indicator="true"
-        :processing="uploading"
+    <div
+      class="cad-workspace grid grid-cols-[246px_minmax(300px,1fr)_264px] gap-4 grow shrink-0 min-h-[650px] max-[1250px]:grid-cols-[220px_minmax(0,1fr)] max-[800px]:flex max-[800px]:flex-col"
+    >
+      <CadImportPanel
+        :drawing="drawing"
+        :source-kind="sourceKind"
+        :sample-kind="sampleKind"
+        :unit="unit"
+        :unit-hint="unitHint"
+        :layers="layers"
+        :active-layers="activeLayers"
+        :uploading="uploading"
+        :progress="loadProgress"
+        @import="importFile"
+        @sample="loadSample"
+        @unit="unit = $event"
+        @layer="toggleLayer"
+        @all-layers="selectAllLayers"
+        @no-layers="activeLayers = []"
+        @download-sample="exportDrawing('dxf')"
+      />
+      <CadViewport
+        ref="viewport"
+        :interior="interior"
+        :segments="visibleSegments"
+        :mode="mode"
+        :preset="preset"
+        :settings="settings"
+        :selected-id="selectedId"
+        :measuring="measuring"
+        :measure-start="measureStart"
+        :measurements="measurements"
+        :bounds="bounds"
+        :total-length="totalLength"
+        @mode="setMode"
+        @preset="preset = $event"
+        @select="selectedId = $event"
+        @measure="measurePoint"
+        @toggle-measure="toggleMeasureWithInterior"
+      />
+      <InteriorDesignPanel
+        v-if="interior.enabled.value"
+        class="max-[1250px]:col-span-full"
+        :state="interior"
+        @place="beginFurniture"
+        @move="moveFurniture"
+        @export="exportInterior"
+        @import="importInterior"
+      />
+      <CadSettingsPanel
+        v-else
+        class="max-[1250px]:col-span-full"
+        :settings="settings"
+        :mode="mode"
+        :selected="selected"
+        :measurements="measurements"
+        @update="updateSettings"
+        @clear-selection="selectedId = null"
+        @clear-measurements="clearMeasurements"
+        @defaults="updateSettings(defaultSettings())"
       />
     </div>
+    <p class="cad-footnote m-0 shrink-0 text-[10px] text-[#9aabb1]">
+      尺寸来自当前单位设置。中心线拉伸预览不自动识别门窗或房间；图层过滤与测距不会修改原始 DXF
+      文件。装修方案独立保存，不修改原始墙线；导入方案需匹配当前图纸、单位和可见图层。
+    </p>
+    <CadLesson
+      v-if="showCode"
+      :interior="interior.enabled.value"
+      :mode="mode"
+      :height="settings.height"
+      :thickness="settings.thickness"
+      :name="drawing.name"
+      :count="visibleSegments.length"
+    />
   </div>
 </template>
