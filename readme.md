@@ -6,9 +6,18 @@
 
 - **基础**：场景、相机、渲染器、几何体、材质、灯光、纹理、坐标与变换、动画入门、场景图
 - **进阶**：模型加载、射线拾取、着色器、粒子系统、性能优化、后期处理、骨骼与变形动画、物理引擎、数学进阶、WebGL 原理
-- **应用**：CAD 户型图转三维、商场三维导航（楼层切换 / 楼层爆炸）
+- **应用**：CAD 户型图转三维、商场三维导航（24 家示例店铺 / 搜索筛选 / 楼层切换与展开 / 走廊最短路径 / 跨层电梯 / 导航动画）
+- **产品展示**：相机结构示例、7 个零件、机身配色、自动旋转、拆解/组装动画、零件显隐与单件查看、截图与配置导出
 - 每个页面统一提供：功能按钮区、可交互 3D 场景（左上角黑底状态提示条）、右侧 420px 代码讲解面板（代码高亮 + 原理讲解实时联动）
 - 场景生命周期统一封装（`useThreeScene`），教学代码与讲解统一由 `useCodeExplain` 驱动
+
+- **地理数据可视化**：三维地球、17 座示例城市、指标排行、区域筛选、球面流向动画、大圆距离、GeoJSON 与截图导出。简化大陆轮廓和本地模拟指标，不代表测绘或实时数据。
+
+- **网页小游戏**：三维城市跑酷，换道与跳跃、金币计分、三档难度、碰撞保护、暂停恢复、1000 米通关和浏览器最高分。
+
+- **园区数字孪生**：6 栋三维楼宇、总览/能耗/安防视图、昼夜切换、模拟传感器、告警确认恢复、道路巡检、趋势图与导出。
+
+- **应急疏散模拟**：网格建筑、人群排队、多出口寻路、出口开关、危险区、速度倍率、疏散曲线与报告导出（教学示例）。
 
 ## 技术栈
 
@@ -67,7 +76,7 @@ Three.js
 │   │   └── business
 │   │       ├── basics/          # 基础模块（10 个教学页）
 │   │       ├── forward/         # 进阶模块（10 个教学页）
-│   │       └── application/     # 应用模块（2 个综合案例）
+│   │       └── application/     # 应用模块（9 个综合案例）
 ```
 
 ## 页面清单
@@ -106,38 +115,14 @@ Three.js
 
 | 页面 | 路由 | 核心内容 |
 | --- | --- | --- |
-| CAD 户型图 | `/application/cad-floor-plan` | DXF 图纸解析、墙体/门窗转三维场景 |
+| 应急疏散模拟 | `/application/evacuation-simulation` | 多源 BFS、人群占用排队、出口与危险区实时修改、过程统计、报告导出 |
+| 园区数字孪生 | `/application/campus-twin` | 楼宇资产、能源视图、模拟设备告警、道路巡检、昼夜切换、数据与截图导出 |
+| 网页小游戏 | `/application/web-game` | 三维跑酷、键盘/触屏操作、金币和生命值、三档难度、最高分、暂停与通关 |
+| CAD 户型图 | `/application/cad-floor-plan` | DXF 单位识别与图层筛选、二维/三维切换、墙体参数、线段检查、测距与导出、室内装修设计 |
 | 商场三维导航 | `/application/mall-navigation` | 平面图转三维、楼层切换、楼层爆炸 |
-
-## 核心封装
-
-### `useThreeScene`（`src/hooks/useThreeScene.ts`）
-
-统一封装 Three.js 场景生命周期：场景 / 相机 / 渲染器 / 轨道控制器 / 网格 / 坐标轴 / 灯光 / 阴影的创建、逐帧渲染循环、容器 Resize 同步与组件卸载销毁。
-
-```ts
-const { scene, camera, renderer, controls } = useThreeScene(containerRef, {
-  camera: { fov: 55, position: [3, 2, 5], lookAt: [0, 0.5, 0] },
-  grid: { size: 6, divisions: 12 },
-  axes: 2,
-  animate: (delta) => { mixer?.update(delta) },
-  onDispose: () => { geo.dispose() },
-})
-```
-
-关键选项：`loop` 支持 `true / false / 'manual'`（`'manual'` 用于 EffectComposer 后期处理等需要页面接管渲染的场景）。
-
-### `useCodeExplain`（`src/hooks/useCodeExplain.ts`）
-
-由 `codeMap` / `explainMap`（函数式动态生成）驱动，输出高亮后的代码 HTML 与讲解文本，随 `activeKey` 实时刷新。缺失的 key 自动降级为空串，避免渲染中断。
-
-### `CodePanel.vue`（`src/components/base/CodePanel.vue`）
-
-代码讲解面板：标题（左侧绿色竖杠）+ 高亮代码区 + 原理讲解区。
-
-### `codeHighlight`（`src/utils/codeHighlight.ts`）
-
-轻量手写语法高亮（关键字 / 字符串 / 数字 / 注释 / THREE 类名），输出 `c-code-*` 系列 CSS 类，无第三方依赖。
+| 产品三维展示与零件拆解 | `/application/product-showcase` | 相机外观、配色、零件选择、显隐/隔离、拆解组装演示与导出 |
+| 仓储物流可视化 | `/application/warehouse-visualization` | 三维货架与库位、库存筛选、单车入出库任务与路线动画 |
+| 工业设备监控 | `/application/industrial-monitoring` | 三维设备回路、传感器趋势、模拟异常、告警确认与恢复、数据导出 |
 
 ## 路由与菜单约定
 
